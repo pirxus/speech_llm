@@ -1,6 +1,7 @@
 # Repo-specific directories
 exp/
 recipes/mlc/*.json
+ AGENTS.md
 
 
 # Byte-compiled / optimized / DLL files
