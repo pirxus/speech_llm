@@ -69,8 +69,8 @@ class DefaultASRCollator:
         self,
         feature_extractor,
         tokenizer,
-        prompt_prefix="Transcribe the following speech: ",
-        prompt_suffix="\nTranscript:",
+        prompt_prefix="<|user|>\nTranscribe the following speech:\n",
+        prompt_suffix="\n<|assistant|>\nTranscript:",
         label_column='labels',
         audio_column='audio',
         audio_max_length=None,
@@ -141,7 +141,7 @@ class DefaultASRCollator:
         if isinstance(self.feature_extractor, WhisperFeatureExtractor):
             audio_attention_mask = torch.ones_like(audio_attention_mask)
 
-        if hasattr(batch[0], 'item_idx'):
+        if 'item_idx' in batch[0]:
             return {
                 "speech_feats": input_features,
                 "audio_attention_mask": audio_attention_mask,

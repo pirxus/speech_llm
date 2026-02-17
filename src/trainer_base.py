@@ -37,7 +37,7 @@ def main(args):
             logger.info("Loading pretrained model..")
         with open(args.from_pretrained + '/config.json', 'r') as f:
             model_args = json.load(f)
-        
+
         # create the joint model
         model = SpeechLLMBase(**model_args)
 
@@ -119,7 +119,7 @@ def main(args):
 
         # create optimizer
         opt = torch.optim.AdamW(model.parameters(), lr=args.lr, weight_decay=args.wdecay)
-        
+
         # warmup scheduler
         if args.warmup:
             scheduler = torch.optim.lr_scheduler.LambdaLR(opt, lr_lambda=lambda step: min((step + 1) / args.warmup, 1.0))
@@ -133,13 +133,13 @@ def main(args):
 
         # Create infinite data loaders for step-based training
         train_iter = iter(train_loader)
-        
+
         if accelerator.is_local_main_process:
             logger.info(f"Starting training for {args.steps} steps with {accelerator.num_processes} GPUs")
             logger.info(f"Training with batch size {args.bsize} and gradient accumulation steps {args.gradient_accumulation_steps}")
             logger.info(f"Total batch size: {args.bsize * accelerator.num_processes * args.gradient_accumulation_steps}")
             best_checkpoints = []
-        
+
         model.train()
         progress_bar = tqdm(range(args.steps), desc="Training", disable=not accelerator.is_local_main_process)
 
@@ -165,7 +165,7 @@ def main(args):
             #    texts = tokenizer.batch_decode(speech_out, skip_special_tokens=True)
             #    print(texts)
             #    model.train()
-                
+
             # forward pass
             model_out = model(**batch_dict)
 
@@ -183,13 +183,13 @@ def main(args):
                 #            param.grad = None
 
                 opt.step()
-                if scheduler: 
+                if scheduler:
                     scheduler.step()
                 opt.zero_grad()
 
             # Log loss
             gathered_loss = accelerator.gather(loss.detach()).mean()
-            
+
             if accelerator.is_local_main_process and global_step % args.logging_steps == 0:
                 with logging_redirect_tqdm():
                     logger.info(f"Step: {global_step}, Loss: {gathered_loss.item():.7f}")
@@ -197,17 +197,17 @@ def main(args):
                 progress_bar.set_postfix({
                     "lr": opt.param_groups[0]["lr"],
                 })
-            
+
             global_step += 1
-            
+
             # Run evaluation at specified intervals - only on main process
             if global_step % args.eval_steps == 0:
                 model.eval()
-                
+
                 if accelerator.is_local_main_process:
                     with logging_redirect_tqdm():
                         logger.info(f"Running evaluation at step {global_step}...")
-                
+
                 with torch.no_grad():
                     eval_losses = []
 
@@ -222,7 +222,7 @@ def main(args):
                         loss = model_out['loss']
 
                         gathered_loss = accelerator.gather(loss).mean()
-            
+
                         eval_losses.append(gathered_loss)
 
                     eval_loss = sum(eval_losses) / len(eval_losses)
@@ -248,7 +248,7 @@ def main(args):
                                 os.remove(worst_path)
                                 with logging_redirect_tqdm():
                                     logger.info(f"Removed checkpoint: {worst_path}")
-                        
+
                         # Save best model
                         if eval_loss < best_eval_loss:
                             best_eval_loss = eval_loss
@@ -264,7 +264,7 @@ def main(args):
                         del unwrapped_model
 
                 # Sync early stopping decision across processes
-                should_stop = torch.tensor(1.0 if early_stop_counter >= args.early_stopping_patience else 0.0, 
+                should_stop = torch.tensor(1.0 if early_stop_counter >= args.early_stopping_patience else 0.0,
                                           device=accelerator.device)
                 should_stop = accelerator.reduce(should_stop, reduction="sum")
                 if should_stop.item() > 0:
@@ -272,14 +272,14 @@ def main(args):
                         with logging_redirect_tqdm():
                             logger.info(f"Early stopping after {global_step} steps")
                     break
-                        
+
                 # Return to training mode for all processes
-                model.train() 
+                model.train()
 
             # Stop training after specified steps
             if global_step >= args.steps:
                 break
-                
+
         if accelerator.is_local_main_process:
             logger.info(f"Training completed after {global_step} steps")
 
@@ -314,7 +314,7 @@ def main(args):
             # prepare the test loader
             test_loader = accelerator.prepare(test_loader)
 
-            for batch_dict in tqdm(test_loader, desc=f"Running prediction on test split '{test_split}'", total=len(dataset) // (args.bsize * accelerator.num_processes), disable=not accelerator.is_local_main_process):
+            for batch_dict in tqdm(test_loader, desc=f"Running prediction on test split '{test_split}'", total=len(test_dset) // (args.bsize * accelerator.num_processes), disable=not accelerator.is_local_main_process):
 
                 # get the item ids for de-duplication afterwards
                 item_indices = batch_dict.pop('item_indices')
@@ -343,10 +343,23 @@ def main(args):
                     item_ids = gathered_item_ids
 
             if accelerator.is_local_main_process:
+                # first, deduplicate the predictions, there can be multiple same ids because of batching
+                unique_predictions = []
+                unique_gts = []
+                unique_ids = []
+                for prediction, gt, item_id in zip(predictions, gts, item_ids):
+                    if item_id not in unique_ids:
+                        unique_predictions.append(prediction)
+                        unique_gts.append(gt)
+                        unique_ids.append(item_id)
+
+                # let's sort the predictions by item_id
+                unique_predictions = [x for _, x in sorted(zip(unique_ids, unique_predictions))]
+                unique_gts = [x for _, x in sorted(zip(unique_ids, unique_gts))]
+
                 global_test_predictions[test_split] = {
-                    "predictions": predictions,
-                    "gts": gts,
-                    "item_ids": item_ids,
+                    "predictions": unique_predictions,
+                    "labels": unique_gts,
                 }
 
         # write the predictions to a file
@@ -374,7 +387,7 @@ def parse_args():
     model_group.add_argument("--from_pretrained", type=str, help="path to the pretrained joint model")
 
     opt_group = parser.add_argument_group("Training and Optimization related")
-    opt_group.add_argument("--ngpus", type=int, default=1, help="number of gpus")
+    #opt_group.add_argument("--ngpus", type=int, default=1, help="number of gpus")
     opt_group.add_argument("--lr", type=float, default=1e-4, help="learning rate")
 
     opt_group.add_argument("--wdecay", type=float, default=0.0, help="weight decay")
@@ -403,13 +416,13 @@ def parse_args():
     connector_group.add_argument("--dropout", type=float, default=0.1, help="dropout factor for the connector")
 
     data_group = parser.add_argument_group("Data related arguments")
-    data_group.add_argument("--train_split", type=str, default="train", description="Train split name")
-    data_group.add_argument("--validation_split", type=str, default="validation", description="Validation split name")
-    data_group.add_argument("--test_splits", type=str, default="test", nargs="+", description="List of test split names")
+    data_group.add_argument("--train_split", type=str, default="train", help="Train split name")
+    data_group.add_argument("--validation_split", type=str, default="validation", help="Validation split name")
+    data_group.add_argument("--test_splits", type=str, default="test", nargs="+", help="List of test split names")
 
     control_group = parser.add_argument_group("Trainer control related arguments")
-    control_group.add_argument("--do_train", action="store_true", description="Runs training in the trainer script")
-    control_group.add_argument("--do_generate", action="store_true", description="Runs test split prediction in the trainer script")
+    control_group.add_argument("--do_train", action="store_true", help="Runs training in the trainer script")
+    control_group.add_argument("--do_generate", action="store_true", help="Runs test split prediction in the trainer script")
 
 
     args = parser.parse_args()
@@ -421,4 +434,3 @@ if __name__ == "__main__":
     if args.seed is not None: torch.manual_seed(args.seed)
 
     main(args)
-

@@ -1,13 +1,13 @@
 #!/bin/bash
-#$ -N train_post_norm
+#$ -N train_post_wlg_cont
 #$ -q long.q@*
 #$ -l ram_free=64G,mem_free=64G
 #$ -l matylda6=0.5,scratch=0.5
 #$ -l gpu=2,gpu_ram=40G
-#$ -o /mnt/matylda6/isedlacek/projects/eloquence/t2.5/speech_llm/exp/job_logs/train_post_norm.o
-#$ -e /mnt/matylda6/isedlacek/projects/eloquence/t2.5/speech_llm/exp/job_logs/train_post_norm.e
+#$ -o /mnt/matylda6/isedlacek/projects/eloquence/t2.5/speech_llm/exp/job_logs/train_post_wlg_cont.o
+#$ -e /mnt/matylda6/isedlacek/projects/eloquence/t2.5/speech_llm/exp/job_logs/train_post_wlg_cont.e
 N_GPUS=2
-EXPERIMENT="train_post_norm"
+EXPERIMENT="train_post_wlg_cont"
 #
 # Enable opening multiple files
 ulimit -n 4096
@@ -24,19 +24,20 @@ cd $WORK_DIR
 
 args=(
     --out_dir "$WORK_DIR/exp/$EXPERIMENT"
-    --speech_enc_id "openai/whisper-small.en"
+    #--speech_enc_id "openai/whisper-small.en"
+    --speech_enc_id "openai/whisper-large-v3"
     --llm_id "allenai/OLMo-2-0425-1B-Instruct"
 
     --lr 1e-4
     --wdecay 0.0005
-    --steps 15000
+    --steps 5000
     --eval_steps 500
-    --warmup 500
+    --warmup 100
     --nj 2 # 3
     --n_best 1
     --shuffle
-    --bsize 12 # per device
-    --gradient_accumulation_steps 2
+    --bsize 24 # per device
+    --gradient_accumulation_steps 1
     --seed 42
     --logging_steps 10
     #--norm_first
@@ -49,7 +50,7 @@ args=(
     --do_train
     --do_generate
 
-    #--from_pretrained "/mnt/matylda6/isedlacek/projects/eloquence/t2.5/speech_llm/exp/train_test"
+    --from_pretrained "/mnt/matylda6/isedlacek/projects/eloquence/t2.5/speech_llm/exp/train_post_wlg"
 )
 
 echo "Running with args: ${args[@]}"

@@ -1,0 +1,26 @@
+### Task:
+Analyze the provided dialogue between two speakers and generate exactly {N_QUESTIONS} "impossible" questions based on its context.
+
+### Task Instructions and Constraints:
+1. **Definition of "Impossible":** The questions must be logically related to the topics discussed, but the specific answers must be completely absent from the text. They should require information, data, or context that the speakers did not disclose.
+2. **Relevance:** Do not ask random questions. Every question must feel like a natural follow-up to the conversation.
+5. **Language:** The questions must be in the the same language as the input dialog (Spanish or English).
+4. **Format:** The output must be strictly in JSONL (JSON Lines) format.
+6. **Output Format:** Output the results in JSONL (JSON Lines) format within a single code block.
+7. **Output Schema:** Each line must be a JSON object containing:
+   - "question": (string) The generated question.
+
+### Output Example -- English:
+{{"question": "What is the name of the bookstore where Jasmine planned to shop for her nephews?"}}
+{{"question": "Which specific airline did speaker 1 use for her first trip to Portugal?"}}
+{{"question": "Why did speaker 1 want to visit Amsterdam, specifically?"}}
+
+### Output Example -- Spanish:
+{{"question": "¿Por qué Linda no bebe alcohol?"}}
+{{"question": "¿Qué posición juega Tommy en el equipo?"}}
+{{"question": "¿A qué hora son los entrenamientos de fútbol de los niños?"}}
+
+### Dialogue:
+```
+{dialogue}
+```

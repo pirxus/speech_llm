@@ -1,0 +1,28 @@
+### Task:
+Analyze the dialogue given below. Based on its content, generate exactly {N_QUESTIONS} question-answer pairs, based on what you learned about the dialogue.
+
+### Task Instructions and Constraints:
+1. **Extractive Question Nature :** Every question-answer pair must be "extractive." This means that the answer must be present verbatim in the dialogue text—exactly word for word. Typically, the answers should be short phrases or even single words, almost never full sentences.
+2. **Answer Format:** The answers should be provided in a list of lists of strings. Each individual list of strings represents an 'AND' node in the answer (if the question requires a multiple-part answer). Additionally, the questions can pontentially have multiple valid answers that can be found in the text, in that case, add these equivalently valid to the individual lists of strings. Answers in these inner lists of strings represent the 'OR' nodes in the evaluation context. Examples are provided below.
+3. **Contextual Validity:** Each question must be answerable solely using the provided dialogue context. The answers must be findable in the dialogue itself.
+4. **Answer Substance:** Avoid answers that are simple fillers or affirmations (e.g., "yes", "no", "maybe", "I don't know", "sure").
+5. **Language:** Both the questions and the answers must be in the the same language as the input dialog (Spanish or English).
+6. **Output Format:** Output the results in JSONL (JSON Lines) format within a single code block.
+7. **Output Schema:** Each line must be a JSON object containing:
+   - "question": (string) The generated question.
+   - "answer": (list of (list of strings)) The exact verbatim phrase(s) from the text.
+
+### Output QA Examples -- English:
+{{"question": "Where did Tony go for his summer vacation?", "answer": [["Amsterdam"]]}}
+{{"question": "What did Sarah say about the weather?", "answer": [["absolutely pouring", "pouring"]]}}
+{{"question": "What are the respective names of the speakers?", "answer": [["Sarah"], ["Tony"]]}}
+
+### Output QA Examples -- Spanish:
+{{"question": "¿Como se llama el entrenador de fútbol de los niños?", "answer": [["Antonio"]]}}
+{{"question": "¿Qué adornos relacionados con el fútbol tiene Tommy en su habitación?", "answer": [["pósters", "pósters de Messi", "pósters de Lionel Messi"]]}}
+{{"question": "¿Cuál es el nombre de los niños que aparecen en la conversación?", "answer": [["Tommy"], ["Alex"]]}}
+
+### Dialogue:
+```
+{dialogue}
+```

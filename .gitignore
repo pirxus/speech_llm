@@ -1,5 +1,6 @@
 # Repo-specific directories
 exp/
+recipes/mlc/*.json
 
 
 # Byte-compiled / optimized / DLL files

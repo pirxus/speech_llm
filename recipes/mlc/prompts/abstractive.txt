@@ -1,0 +1,29 @@
+### Task:
+Analyze the dialogue given below. Based on its content, generate exactly {N_QUESTIONS} question-answer pairs, based on what you learned about the dialogue.
+
+### Task Instructions and Constraints:
+1. **Abstractive Question Nature:** Ask questions about the dialogue in general. Ideally, the answers to the questions should require deduction and should not be present verbatim in the text. The answers should not be explicitly stated in the text but must be inferred from the context (e.g., the relationship between speakers, the setting, the underlying tone, or the specific situation). The answer should be specific and factual. The questions should be formed around some general understanding of the dialogue, so try to be creative with them :)) However, make sure that the questions are also to the point, avoid asking about too general concepts, otherwise the questions might become too vague and therefore too difficult to answer precisely.
+2. **Answer Consistency:** The answers should be short sentences answering the question. Again, avoid simply extracting information verbatim from the dialogue, always formulate the answers in new sentences. Avoid multiple-sentence answers -- the questions should be formed clearly enough for the answers to also be clear, factual and to the point.
+3. **Contextual Validity:** Every question must be answerable using only the information or context provided in the dialogue.
+4. **Answer Substance:** Answers must be descriptive and informative. Avoid one-word responses or "low-effort" answers like "yes," "no," "maybe," or "information not provided."
+5. **Language:** Both the questions and the answers must be in the the same language as the input dialog (Spanish or English).
+6. **Output Format:** Output the results in JSONL (JSON Lines) format within a single code block.
+7. **Output Schema:** Each line must be a valid JSON object containing:
+   - "question": (string)
+   - "answer": (string)
+
+### Output QA Examples -- English:
+{{"question": "What is the likely relationship between the speakers?", "answer": "The second speaker calls the first speaker's mother 'aunt Peggy', therefore they are likely cousins"}}
+{{"question": "Why did the first speaker eventually give up on their ambition to learn how to draw?", "answer": "O1 stopped pursuing drawing because they came to the conclusion that they lacked the natural aptitude or 'cards' for it."}}
+{{"question": "What can be inferred about the speakers' current stage of life and financial independence?", "answer": "The speakers appear to be young adults or students who are still financially dependent on their parents."}}
+
+
+### Output QA Examples -- Spanish:
+{{"question": "¿Cómo se siente Linda respecto al ambiente futbolero en casa?", "answer": "Le parece ruidoso y abrumador, por eso suele buscar excusas para ausentarse cuando hay partidos."}}
+{{"question": "¿Qué tipo de relación parece haber entre Javier y Linda?", "answer": "Una relación cercana y afectuosa, con bromas y confianza propias de una pareja estable."}}
+{{"question": "¿Por qué Linda ofrece pastelitos a Alex y Tommy?", "answer": "Porque quiere ser una buena anfitriona y hacer que su hijo y su amigo se sientan bienvenidos en casa."}}
+
+### Dialogue:
+```
+{dialogue}
+```

@@ -15,7 +15,7 @@ import subprocess
 logger = logging.getLogger(__name__)
 
 
-class TestSetWrapper(torch.Dataset):
+class TestSetWrapper(torch.utils.data.Dataset):
     def __init__(self, dataset) -> None:
         self.dataset = dataset
     

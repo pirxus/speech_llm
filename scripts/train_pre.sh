@@ -1,13 +1,13 @@
 #!/bin/bash
-#$ -N train_post_norm
+#$ -N train_pre_norm
 #$ -q long.q@*
 #$ -l ram_free=64G,mem_free=64G
 #$ -l matylda6=0.5,scratch=0.5
-#$ -l gpu=2,gpu_ram=40G
-#$ -o /mnt/matylda6/isedlacek/projects/eloquence/t2.5/speech_llm/exp/job_logs/train_post_norm.o
-#$ -e /mnt/matylda6/isedlacek/projects/eloquence/t2.5/speech_llm/exp/job_logs/train_post_norm.e
+#$ -l gpu=2,gpu_ram=23G
+#$ -o /mnt/matylda6/isedlacek/projects/eloquence/t2.5/speech_llm/exp/job_logs/train_pre_norm.o
+#$ -e /mnt/matylda6/isedlacek/projects/eloquence/t2.5/speech_llm/exp/job_logs/train_pre_norm.e
 N_GPUS=2
-EXPERIMENT="train_post_norm"
+EXPERIMENT="train_pre_norm"
 #
 # Enable opening multiple files
 ulimit -n 4096
@@ -39,7 +39,7 @@ args=(
     --gradient_accumulation_steps 2
     --seed 42
     --logging_steps 10
-    #--norm_first
+    --norm_first
     #--limit_eval_steps 10
 
     --train_split train
