@@ -33,6 +33,10 @@ def main(args):
         logger.info(f"Process rank: {accelerator.process_index}")
         logger.info(f"Number of processes: {accelerator.num_processes}")
 
+    # create the speech preprocessor for dataset and load the tokenizer
+    speech_processor = AutoProcessor.from_pretrained(args.speech_enc_id)
+    tokenizer = AutoTokenizer.from_pretrained(args.llm_id)
+
     # load the model
     if args.from_pretrained:
         if accelerator.is_local_main_process:
@@ -47,7 +51,7 @@ def main(args):
     else:
         # create the model config
         model_args = dict(
-            speech_enc_id=args.speech_enc_id,
+            speech_enc_id='fbank_encoder',
             llm_id=args.llm_id,
             connector_config=dict(
                 num_layers=args.num_layers,
@@ -60,6 +64,8 @@ def main(args):
                 use_positional_embeddings=args.use_positional_embeddings,
                 dropout=args.dropout,
             ),
+            num_mel_bins=speech_processor.feature_extractor.feature_size,
+            d_model=args.encoder_d_model
         )
 
         # instantiate the model from config
@@ -76,22 +82,25 @@ def main(args):
         # print the model parameters
         params = sum(p.numel() for p in model.parameters())
         trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+        trainable_encoder_params = sum(p.numel() for p in model.speech_encoder.parameters() if p.requires_grad)
+        trainable_connector_params = sum(p.numel() for p in model.connector.parameters() if p.requires_grad)
+
         logger.info(f"Total parameters: {params:,}, Trainable parameters: {trainable_params:,}")
+        logger.info(f"Encoder trainable parameters: {trainable_encoder_params:,}")
+        logger.info(f"Connector trainable parameters: {trainable_connector_params:,}")
+    
 
 
     # prepare the model
     model = accelerator.prepare(model)
-
-    # create the speech preprocessor for dataset and load the tokenizer
-    speech_processor = AutoProcessor.from_pretrained(args.speech_enc_id)
-    tokenizer = AutoTokenizer.from_pretrained(args.llm_id)
 
     # Create training dataset, batch sampler and a dataloader
     # FIX: create a general dataset object parametrized by the arguments
     dataset = load_from_disk('/mnt/matylda6/isedlacek/data/how2')
 
     collator = create_collator(
-        'DefaultASRCollator', # TODO: make parametrizable
+        'FBankCollator', # TODO: make parametrizable
         feature_extractor=speech_processor.feature_extractor, # TODO: collator arguments should have a separate namespace in the config
         tokenizer=tokenizer,
         label_column='transcription',
@@ -400,7 +409,7 @@ def parse_args():
     opt_group.add_argument("--logging_steps", type=int, default=10, help="logging steps")
     opt_group.add_argument("--warmup", type=int, default=1, help="number of warmup steps")
     opt_group.add_argument("--gradient_accumulation_steps", type=int, default=1, help="gradient_accumulation_steps")
-    opt_group.add_argument("--n_best", type=int, default=3, help="number of best checkpoints to keep")
+    opt_group.add_argument("--n_best", type=int, default=1, help="number of best checkpoints to keep")
     opt_group.add_argument("--early_stopping_patience", type=int, default=3, help="number of evaluations without improvement before early stopping")
 
     opt_group.add_argument("--nj", type=int, default=0, help="number of workers")
@@ -418,6 +427,8 @@ def parse_args():
     connector_group.add_argument("--add_final_norm", action="store_true", help="Whether add one last layernorm before the LM projection at the end of the connector")
     connector_group.add_argument("--use_positional_embeddings", action="store_true", help="Whether to use sinusoidal positional embeddings in the connector")
     connector_group.add_argument("--dropout", type=float, default=0.1, help="dropout factor for the connector")
+
+    connector_group.add_argument("--encoder_d_model", type=int, default=512, help="fbank encoder d_model")
 
     data_group = parser.add_argument_group("Data related arguments")
     data_group.add_argument("--train_split", type=str, default="train", help="Train split name")

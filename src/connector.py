@@ -17,19 +17,20 @@ class SinusoidalPositionalEmbedding(nn.Module):
 
 class Connector(nn.Module):
     def __init__(
-            self,
-            in_feature_dim,
-            out_proj_dim,
-            num_layers=2,
-            attn_heads=16,
-            hidden_size=1024,
-            intermediate_size=4096,
-            downsampling_factor=6,
-            dtype=torch.bfloat16,
-            norm_first=True,
-            use_positional_embeddings=False,
-            dropout=0.1,
-            **kwargs
+        self,
+        in_feature_dim,
+        out_proj_dim,
+        num_layers=2,
+        attn_heads=16,
+        hidden_size=1024,
+        intermediate_size=4096,
+        downsampling_factor=6,
+        dtype=torch.bfloat16,
+        norm_first=True,
+        add_final_norm=False,
+        use_positional_embeddings=False,
+        dropout=0.1,
+        **kwargs
         ):
         self.in_feature_dim = in_feature_dim
         self.out_proj_dim = out_proj_dim
@@ -40,6 +41,7 @@ class Connector(nn.Module):
         self.downsampling_factor = downsampling_factor
         self.dtype = dtype
         self.norm_first = norm_first
+        self.add_final_norm = add_final_norm
         self.use_positional_embeddings = use_positional_embeddings
         self.dropout = dropout
 
@@ -68,6 +70,9 @@ class Connector(nn.Module):
 
         self.in_projection = nn.Linear(self.in_feature_dim * self.downsampling_factor, self.hidden_size, dtype=self.dtype)
         self.attention_pooling = nn.MaxPool1d(downsampling_factor, stride=downsampling_factor)
+
+        if self.add_final_norm:
+            self.final_norm = nn.LayerNorm(self.hidden_size)
 
         self.lm_projection = nn.Linear(self.hidden_size, self.out_proj_dim, dtype=self.dtype)
 
@@ -109,6 +114,9 @@ class Connector(nn.Module):
             x = self.positional_embeddings(x)
 
         x = self.transformer(x, src_key_padding_mask=attention_mask.bool())
+
+        if self.add_final_norm:
+            x = self.final_norm(x)
 
         x = self.lm_projection(x)
 

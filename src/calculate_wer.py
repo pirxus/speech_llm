@@ -5,6 +5,7 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--input", type=str, required=True, nargs="+", help="List of prediction json files.")
+parser.add_argument("--includes", type=str, default="", help="Filter only experiments that include this string in the name.")
 
 args = parser.parse_args()
 
@@ -20,12 +21,20 @@ def calculate_wer(gt, hyp):
     del metrics["ops"]
     del metrics["truth"]
     del metrics["hypothesis"]
+    del metrics["wil"]
+    del metrics["mer"]
+    del metrics["wip"]
     return metrics
 
 
 for input_file in args.input:
+
+    exp_name = input_file.split('/')[-2]
+
+    if args.includes not in exp_name:
+        continue
     try:
-        print(f"Processing experiment {input_file.split('/')[-2]}")
+        print(f"Processing experiment {exp_name}")
     except:
         pass
     with open(input_file, 'r') as f:

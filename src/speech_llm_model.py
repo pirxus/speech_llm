@@ -1,11 +1,15 @@
 import torch
 import sys
+import math
+import json
 import torch.nn as nn
+import os
 from torch.nn import CrossEntropyLoss
 from typing import Optional
 from transformers import AutoModelForCausalLM, WhisperForConditionalGeneration
+from transformers.modeling_outputs import BaseModelOutput
 
-from connector import Connector
+from connector import Connector, SinusoidalPositionalEmbedding
 
 def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: Optional[int], decoder_start_token_id: Optional[int]):
     """
@@ -21,6 +25,7 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: Optional[int], dec
     shifted_input_ids.masked_fill_(shifted_input_ids == -100, pad_token_id)
 
     return shifted_input_ids
+
 
 
 class SpeechLLMBase(nn.Module):
@@ -49,15 +54,22 @@ class SpeechLLMBase(nn.Module):
         self.freeze_llm()
 
         # TODO make general and allow for other encoders
-        self.speech_encoder = WhisperForConditionalGeneration.from_pretrained(
-            speech_enc_id,
-            torch_dtype=torch_dtype,
-            attn_implementation="sdpa",
-        ).model.encoder
-        self.freeze_encoder()
+        if 'whisper' in speech_enc_id:
+            self.speech_encoder = WhisperForConditionalGeneration.from_pretrained(
+                speech_enc_id,
+                torch_dtype=torch_dtype,
+                attn_implementation="sdpa",
+            ).model.encoder
+            self.freeze_encoder()
+
+        else:
+            self.speech_encoder = FBankEncoder(
+                d_model=kwargs['d_model'],
+                num_mel_bins=kwargs['num_mel_bins'],
+            )
 
         self.connector = Connector(
-            self.speech_encoder.config.d_model, # FIXME not general
+            self.speech_encoder.config.get('d_model'), # FIXME not general
             self.llm.config.hidden_size,
             **connector_config,
             **kwargs,
@@ -65,6 +77,25 @@ class SpeechLLMBase(nn.Module):
 
         # unfreeze the specified whisper layers
         #self.encoder_unfreeze_layers(enc_n_layers_to_unfreeze)
+
+    @classmethod
+    def from_pretrained(cls, path, device='cpu', return_model_args=False):
+
+        with open(os.path.join(path, 'config.json'), 'r') as f:
+            model_args = json.load(f)
+
+        # create the joint model
+        model = cls(**model_args).to(device)
+
+        #map_location = {"cuda:0": f"cuda:{process_index}"}
+        map_location = device
+        state_dict = torch.load(os.path.join(path, 'model_best.pt'), map_location=map_location)
+        model.load_state_dict(state_dict)
+
+        if return_model_args:
+            return model, model_args
+
+        return model
 
     def freeze_encoder(self):
         self.speech_encoder.requires_grad_(False)
@@ -97,7 +128,16 @@ class SpeechLLMBase(nn.Module):
             if attention_mask.all():
                 attention_mask = torch.ones(speech_enc_out.shape[:-1], device=speech_enc_out.device)
             else:
-                raise NotImplementedError("fix attention mask downsampling for the speech encoders")
+                try:
+                    attention_mask = self.speech_encoder.downsample_attention_mask(attention_mask=attention_mask)
+                    if attention_mask.shape[-1] >= speech_enc_out.shape[-2]:
+                        attention_mask = attention_mask[:,:speech_enc_out.shape[-2]]
+                    else:
+                        diff = speech_enc_out.shape[-2] - attention_mask.shape[-1]
+                        mask_appendix = attention_mask[...,-1].unsqueeze(1).repeat(1, diff)
+                        attention_mask = torch.cat((attention_mask, mask_appendix), dim=1)
+                except:
+                    raise NotImplementedError("fix attention mask downsampling for the speech encoders")
 
         return speech_enc_out, attention_mask
 
@@ -335,3 +375,39 @@ class SpeechLLMBase(nn.Module):
         )
 
         return decoder_outputs
+
+class FBankEncoder(nn.Module):
+    def __init__(
+        self,
+        d_model=512,
+        num_mel_bins=80,
+        max_source_positions = 1500,
+    ):
+
+        super(FBankEncoder, self).__init__()
+        
+        embed_dim = d_model
+        self.config = {'d_model': embed_dim}
+        self.num_mel_bins = num_mel_bins
+        self.max_source_positions = max_source_positions
+        self.embed_scale = math.sqrt(embed_dim)
+
+        self.conv1 = nn.Conv1d(self.num_mel_bins, embed_dim, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(embed_dim, embed_dim, kernel_size=3, stride=2, padding=1)
+
+        self.embed_positions = SinusoidalPositionalEmbedding(embed_dim, self.max_source_positions)
+
+        self.attention_pooling = nn.MaxPool1d(2, stride=2)
+
+
+    def downsample_attention_mask(self, attention_mask=None):
+        attention_mask = self.attention_pooling(attention_mask.float()).long()
+        return attention_mask
+
+    def forward(self, x, attention_mask=None):
+        x = self.conv1(x)
+        x = self.conv2(x)
+        x = x.permute(0, 2, 1)
+        x = self.embed_positions(x)
+        return BaseModelOutput(x)
+
