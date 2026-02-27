@@ -4,14 +4,19 @@ import math
 import json
 import torch.nn as nn
 import os
-from torch.nn import CrossEntropyLoss
+from torch.nn import CrossEntropyLoss, CTCLoss
 from typing import Optional
 from transformers import AutoModelForCausalLM, WhisperForConditionalGeneration
 from transformers.modeling_outputs import BaseModelOutput
 
 from connector import Connector, SinusoidalPositionalEmbedding
 
-def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: Optional[int], decoder_start_token_id: Optional[int]):
+
+def shift_tokens_right(
+    input_ids: torch.Tensor,
+    pad_token_id: Optional[int],
+    decoder_start_token_id: Optional[int],
+):
     """
     Shift input ids one token to the right.
     """
@@ -27,11 +32,10 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: Optional[int], dec
     return shifted_input_ids
 
 
-
 class SpeechLLMBase(nn.Module):
     def __init__(
         self,
-        speech_enc=None, 
+        speech_enc=None,
         speech_enc_id=None,
         llm_id=None,
         llm=None,
@@ -54,7 +58,7 @@ class SpeechLLMBase(nn.Module):
         self.freeze_llm()
 
         # TODO make general and allow for other encoders
-        if 'whisper' in speech_enc_id:
+        if "whisper" in speech_enc_id:
             self.speech_encoder = WhisperForConditionalGeneration.from_pretrained(
                 speech_enc_id,
                 torch_dtype=torch_dtype,
@@ -64,30 +68,29 @@ class SpeechLLMBase(nn.Module):
 
         else:
             self.speech_encoder = FBankEncoder(
-                d_model=kwargs['d_model'],
-                num_mel_bins=kwargs['num_mel_bins'],
+                d_model=kwargs["d_model"],
+                num_mel_bins=kwargs["num_mel_bins"],
             )
 
         self.connector = Connector(
-            self.speech_encoder.config.get('d_model'), # FIXME not general
+            self.speech_encoder.config.get("d_model"),  # FIXME not general
             self.llm.config.hidden_size,
             **connector_config,
             **kwargs,
         )
 
         # unfreeze the specified whisper layers
-        #self.encoder_unfreeze_layers(enc_n_layers_to_unfreeze)
+        # self.encoder_unfreeze_layers(enc_n_layers_to_unfreeze)
 
     @classmethod
-    def from_pretrained(cls, path, device='cpu', return_model_args=False):
-
-        with open(os.path.join(path, 'config.json'), 'r') as f:
+    def from_pretrained(cls, path, device="cpu", return_model_args=False):
+        with open(os.path.join(path, "config.json"), "r") as f:
             model_args = json.load(f)
 
         # create the joint model
         model = cls(**model_args).to(device)
 
-        #map_location = {"cuda:0": f"cuda:{process_index}"}
+        # map_location = {"cuda:0": f"cuda:{process_index}"}
         map_location = device
         state_dict = torch.load(os.path.join(path, 'model_best.pt'), map_location=map_location)
         model.load_state_dict(state_dict)
@@ -102,7 +105,7 @@ class SpeechLLMBase(nn.Module):
 
     def freeze_llm(self):
         self.llm.requires_grad_(False)
-    
+
     def encoder_unfreeze_layers(self, n):
         self.freeze_encoder()
         for i in range(1, n + 1):
@@ -115,10 +118,10 @@ class SpeechLLMBase(nn.Module):
         }
 
     def load_state_dict(self, state_dict, **kwargs):
-        #self.speech_encoder.load_state_dict(state_dict['speech_encoder'], **kwargs)
-        self.connector.load_state_dict(state_dict['connector'], **kwargs)
-        #state_dict['out_proj.weight'] = self.out_proj.weight.data
-        #super(JointRetrieverQAModel, self).load_state_dict(state_dict, **kwargs)
+        # self.speech_encoder.load_state_dict(state_dict['speech_encoder'], **kwargs)
+        self.connector.load_state_dict(state_dict["connector"], **kwargs)
+        # state_dict['out_proj.weight'] = self.out_proj.weight.data
+        # super(JointRetrieverQAModel, self).load_state_dict(state_dict, **kwargs)
 
     def encode_speech(self, speech_feats, attention_mask=None):
         # common for both branches
@@ -131,7 +134,7 @@ class SpeechLLMBase(nn.Module):
                 try:
                     attention_mask = self.speech_encoder.downsample_attention_mask(attention_mask=attention_mask)
                     if attention_mask.shape[-1] >= speech_enc_out.shape[-2]:
-                        attention_mask = attention_mask[:,:speech_enc_out.shape[-2]]
+                        attention_mask = attention_mask[:, : speech_enc_out.shape[-2]]
                     else:
                         diff = speech_enc_out.shape[-2] - attention_mask.shape[-1]
                         mask_appendix = attention_mask[...,-1].unsqueeze(1).repeat(1, diff)
@@ -142,18 +145,16 @@ class SpeechLLMBase(nn.Module):
         return speech_enc_out, attention_mask
 
     def forward(
-            self,
-            speech_feats=None,
-            audio_attention_mask: Optional[torch.LongTensor] = None,
-            prompt_prefix_ids: Optional[torch.LongTensor] = None,
-            prompt_prefix_mask: Optional[torch.LongTensor] = None,
-            prompt_suffix_ids: Optional[torch.LongTensor] = None,
-            prompt_suffix_mask: Optional[torch.LongTensor] = None,
-            decoder_input_ids: Optional[torch.LongTensor] = None,
-            labels: Optional[torch.LongTensor] = None,
-        ):
-
-
+        self,
+        speech_feats=None,
+        audio_attention_mask: Optional[torch.LongTensor] = None,
+        prompt_prefix_ids: Optional[torch.LongTensor] = None,
+        prompt_prefix_mask: Optional[torch.LongTensor] = None,
+        prompt_suffix_ids: Optional[torch.LongTensor] = None,
+        prompt_suffix_mask: Optional[torch.LongTensor] = None,
+        decoder_input_ids: Optional[torch.LongTensor] = None,
+        labels: Optional[torch.LongTensor] = None,
+    ):
         if labels is not None:
             # we don't want a bos token at the beginning of the labels
             if labels[0, 0] == self.llm.config.bos_token_id:
@@ -161,7 +162,7 @@ class SpeechLLMBase(nn.Module):
 
             if decoder_input_ids is None:
                 eos_token_id = self.llm.config.eos_token_id
-                #eos_token_id = 128009 # FIXME
+                # eos_token_id = 128009 # FIXME
                 decoder_input_ids = shift_tokens_right(
                     labels, eos_token_id, self.llm.config.bos_token_id
                 )
@@ -169,7 +170,7 @@ class SpeechLLMBase(nn.Module):
                 # because of the way we compute loss, we don't need the shifted decoder_input_ids
                 # NOTE: this may not be ideal, think about what this means for the prompt
                 # suffix -- perhaps we need to enforce a space at the end of it?
-                decoder_input_ids = decoder_input_ids[:,1:]
+                decoder_input_ids = decoder_input_ids[:, 1:]
 
         # forward through the speech encoder and the connector
         speech_enc_out, audio_attention_mask = self.encode_speech(speech_feats, audio_attention_mask)
@@ -186,7 +187,6 @@ class SpeechLLMBase(nn.Module):
 
         # prepend the prompt prefix to the connector output
         if prompt_prefix_ids is None:
-
             if self.llm.config.bos_token_id is not None:
                 prompt_prefix_ids = (
                     torch.LongTensor([[self.llm.config.bos_token_id]])
@@ -209,8 +209,7 @@ class SpeechLLMBase(nn.Module):
         # embed the prefix ids
         if prompt_prefix_ids is not None:
             prefix_embeds = self.llm.get_input_embeddings()(prompt_prefix_ids)
-            conn_outputs = torch.hstack(
-                (prefix_embeds, conn_outputs))
+            conn_outputs = torch.hstack((prefix_embeds, conn_outputs))
 
             if audio_attention_mask is not None:
                 audio_attention_mask = torch.hstack(
@@ -235,8 +234,7 @@ class SpeechLLMBase(nn.Module):
 
             # embed the suffix ids
             suffix_embeds = self.llm.get_input_embeddings()(prompt_suffix_ids)
-            conn_outputs = torch.hstack(
-                (conn_outputs, suffix_embeds))
+            conn_outputs = torch.hstack((conn_outputs, suffix_embeds))
 
             if audio_attention_mask is not None:
                 audio_attention_mask = torch.hstack(
@@ -245,14 +243,11 @@ class SpeechLLMBase(nn.Module):
         device = conn_outputs.device
 
         decoder_inputs_embeds = self.llm.get_input_embeddings()(decoder_input_ids)
-        decoder_inputs_attn_mask = torch.ones_like(
-            decoder_input_ids, device=device)
+        decoder_inputs_attn_mask = torch.ones_like(decoder_input_ids, device=device)
 
-        decoder_inputs_embeds = torch.hstack(
-            (conn_outputs, decoder_inputs_embeds))
+        decoder_inputs_embeds = torch.hstack((conn_outputs, decoder_inputs_embeds))
 
-        attention_mask = torch.hstack(
-            (audio_attention_mask, decoder_inputs_attn_mask))
+        attention_mask = torch.hstack((audio_attention_mask, decoder_inputs_attn_mask))
 
         decoder_outputs = self.llm(
             inputs_embeds=decoder_inputs_embeds,
@@ -265,7 +260,7 @@ class SpeechLLMBase(nn.Module):
 
         if labels is not None:
             labels = labels.to(logits.device)
-            logits = logits[:, -labels.size(1):, :]
+            logits = logits[:, -labels.size(1) :, :]
             # Shift so that tokens < n predict n
             shift_logits = logits.contiguous()
             shift_labels = labels.contiguous().to(logits.device)
@@ -274,7 +269,8 @@ class SpeechLLMBase(nn.Module):
             loss_fct = CrossEntropyLoss(reduction="mean")
 
             loss = loss_fct(
-                shift_logits.view(-1, self.llm.config.vocab_size), shift_labels.view(-1))
+                shift_logits.view(-1, self.llm.config.vocab_size), shift_labels.view(-1)
+            )
 
         return {
             "logits": logits,
@@ -283,18 +279,19 @@ class SpeechLLMBase(nn.Module):
 
     @torch.no_grad()
     def generate(
-            self,
-            speech_feats: Optional[torch.LongTensor] = None,
-            speech_enc_out: Optional[torch.LongTensor] = None,
-            audio_attention_mask: Optional[torch.LongTensor] = None,
-            prompt_prefix_ids: Optional[torch.LongTensor] = None,
-            prompt_prefix_mask: Optional[torch.LongTensor] = None,
-            prompt_suffix_ids: Optional[torch.LongTensor] = None,
-            prompt_suffix_mask: Optional[torch.LongTensor] = None,
-            **generate_kwargs,
-        ):
-
-        assert speech_feats is not None and speech_feats != speech_enc_out, "Either speech features or the encoder output has to be supplied"
+        self,
+        speech_feats: Optional[torch.LongTensor] = None,
+        speech_enc_out: Optional[torch.LongTensor] = None,
+        audio_attention_mask: Optional[torch.LongTensor] = None,
+        prompt_prefix_ids: Optional[torch.LongTensor] = None,
+        prompt_prefix_mask: Optional[torch.LongTensor] = None,
+        prompt_suffix_ids: Optional[torch.LongTensor] = None,
+        prompt_suffix_mask: Optional[torch.LongTensor] = None,
+        **generate_kwargs,
+    ):
+        assert speech_feats is not None and speech_feats != speech_enc_out, (
+            "Either speech features or the encoder output has to be supplied"
+        )
 
         if speech_enc_out is None:
             speech_enc_out, audio_attention_mask = self.encode_speech(speech_feats, audio_attention_mask)
@@ -312,7 +309,6 @@ class SpeechLLMBase(nn.Module):
 
         # prepend the prompt prefix to the connector output
         if prompt_prefix_ids is None:
-
             if self.llm.config.bos_token_id is not None:
                 prompt_prefix_ids = (
                     torch.LongTensor([[self.llm.config.bos_token_id]])
@@ -335,8 +331,7 @@ class SpeechLLMBase(nn.Module):
         # embed the prefix ids
         if prompt_prefix_ids is not None:
             prefix_embeds = self.llm.get_input_embeddings()(prompt_prefix_ids)
-            conn_outputs = torch.hstack(
-                (prefix_embeds, conn_outputs))
+            conn_outputs = torch.hstack((prefix_embeds, conn_outputs))
 
             if audio_attention_mask is not None:
                 audio_attention_mask = torch.hstack(
@@ -361,8 +356,7 @@ class SpeechLLMBase(nn.Module):
 
             # embed the suffix ids
             suffix_embeds = self.llm.get_input_embeddings()(prompt_suffix_ids)
-            conn_outputs = torch.hstack(
-                (conn_outputs, suffix_embeds))
+            conn_outputs = torch.hstack((conn_outputs, suffix_embeds))
 
             if audio_attention_mask is not None:
                 audio_attention_mask = torch.hstack(
@@ -376,18 +370,18 @@ class SpeechLLMBase(nn.Module):
 
         return decoder_outputs
 
+
 class FBankEncoder(nn.Module):
     def __init__(
         self,
         d_model=512,
         num_mel_bins=80,
-        max_source_positions = 1500,
+        max_source_positions=1500,
     ):
-
         super(FBankEncoder, self).__init__()
-        
+
         embed_dim = d_model
-        self.config = {'d_model': embed_dim}
+        self.config = {"d_model": embed_dim}
         self.num_mel_bins = num_mel_bins
         self.max_source_positions = max_source_positions
         self.embed_scale = math.sqrt(embed_dim)
@@ -395,10 +389,11 @@ class FBankEncoder(nn.Module):
         self.conv1 = nn.Conv1d(self.num_mel_bins, embed_dim, kernel_size=3, padding=1)
         self.conv2 = nn.Conv1d(embed_dim, embed_dim, kernel_size=3, stride=2, padding=1)
 
-        self.embed_positions = SinusoidalPositionalEmbedding(embed_dim, self.max_source_positions)
+        self.embed_positions = SinusoidalPositionalEmbedding(
+            embed_dim, self.max_source_positions
+        )
 
         self.attention_pooling = nn.MaxPool1d(2, stride=2)
-
 
     def downsample_attention_mask(self, attention_mask=None):
         attention_mask = self.attention_pooling(attention_mask.float()).long()
@@ -411,3 +406,188 @@ class FBankEncoder(nn.Module):
         x = self.embed_positions(x)
         return BaseModelOutput(x)
 
+
+class CTCSpeechEncoder(nn.Module):
+    def __init__(
+        self,
+        vocab_size,
+        d_model=512,
+        num_mel_bins=80,
+        num_encoder_layers=6,
+        num_attention_heads=8,
+        intermediate_size=2048,
+        dropout=0.1,
+        max_source_positions=1500,
+        torch_dtype=torch.bfloat16,
+    ):
+        super(CTCSpeechEncoder, self).__init__()
+
+        self.vocab_size = vocab_size
+        self.d_model = d_model
+        self.num_mel_bins = num_mel_bins
+        self.num_encoder_layers = num_encoder_layers
+        self.max_source_positions = max_source_positions
+
+        self.config = {"d_model": d_model}
+
+        # Feature extraction layers (same as FBankEncoder)
+        self.conv1 = nn.Conv1d(num_mel_bins, d_model, kernel_size=3, padding=1)
+        self.conv2 = nn.Conv1d(d_model, d_model, kernel_size=3, stride=2, padding=1)
+
+        # Positional embeddings
+        self.embed_positions = SinusoidalPositionalEmbedding(
+            d_model, max_source_positions
+        )
+
+        # Transformer encoder layers
+        self.transformer_encoder = nn.TransformerEncoder(
+            nn.TransformerEncoderLayer(
+                d_model=d_model,
+                nhead=num_attention_heads,
+                dim_feedforward=intermediate_size,
+                dropout=dropout,
+                activation="gelu",
+                dtype=torch_dtype,
+                batch_first=True,
+                norm_first=True,
+            ),
+            num_layers=num_encoder_layers,
+        )
+
+        # CTC projection head
+        self.ctc_head = nn.Linear(d_model, vocab_size)
+
+        # Attention mask pooling (2x downsampling from conv2)
+        self.attention_pooling = nn.MaxPool1d(2, stride=2)
+
+        # CTC loss
+        self.ctc_loss = CTCLoss(blank=0, reduction="mean", zero_infinity=True)
+
+    def downsample_attention_mask(self, attention_mask=None):
+        attention_mask = self.attention_pooling(attention_mask.float()).long()
+        return attention_mask
+
+    def encode(self, speech_feats=None, audio_attention_mask=None):
+        """
+        Forward pass through encoder layers (without CTC head).
+        Returns encoder outputs compatible with FBankEncoder.
+        """
+        # Conv layers
+        x = self.conv1(speech_feats)
+        x = self.conv2(x)
+        x = x.permute(0, 2, 1)
+
+        # Add positional embeddings
+        x = self.embed_positions(x)
+
+        # Downsample attention mask if provided
+        if audio_attention_mask is not None:
+            audio_attention_mask = self.downsample_attention_mask(audio_attention_mask)
+
+            if audio_attention_mask.shape[-1] >= x.shape[-2]:
+                audio_attention_mask = audio_attention_mask[:, : x.shape[-2]]
+            else:
+                diff = x.shape[-2] - audio_attention_mask.shape[-1]
+                mask_appendix = audio_attention_mask[...,-1].unsqueeze(1).repeat(1, diff)
+                audio_attention_mask = torch.cat((audio_attention_mask, mask_appendix), dim=1)
+
+            # Convert to key_padding_mask format (True = masked)
+            key_padding_mask = audio_attention_mask.eq(0)
+        else:
+            key_padding_mask = None
+
+        # Transformer encoder
+        x = self.transformer_encoder(x, src_key_padding_mask=key_padding_mask)
+
+        return x, audio_attention_mask
+
+    def forward(
+        self,
+        speech_feats=None,
+        audio_attention_mask=None,
+        labels=None,
+        label_lengths=None,
+    ):
+        """
+        Forward pass with CTC loss computation.
+
+        Args:
+            speech_feats: Input features [batch, num_mel_bins, time]
+            audio_attention_mask: Attention mask [batch, time]
+            labels: Target labels [batch, label_seq_len]
+            label_lengths: Length of each label sequence [batch]
+
+        Returns:
+            Dictionary with 'logits', 'loss', and 'encoder_output'
+        """
+        # Get encoder outputs
+        encoder_output, audio_attention_mask = self.encode(
+            speech_feats, audio_attention_mask
+        )
+
+        # CTC projection
+        logits = self.ctc_head(encoder_output)
+
+        loss = None
+        if labels is not None and label_lengths is not None:
+            # Compute input lengths from attention mask
+            if audio_attention_mask is not None:
+                input_lengths = audio_attention_mask.sum(dim=1)
+            else:
+                input_lengths = torch.full(
+                    (logits.shape[0],),
+                    logits.shape[1],
+                    dtype=torch.long,
+                    device=logits.device,
+                )
+
+            # Log probabilities for CTC
+            log_probs = torch.nn.functional.log_softmax(logits, dim=-1)
+
+            # CTC expects [time, batch, vocab]
+            log_probs = log_probs.permute(1, 0, 2)
+
+            # Compute CTC loss
+            loss = self.ctc_loss(log_probs, labels, input_lengths, label_lengths)
+
+        return {
+            "logits": logits,
+            "loss": loss,
+            "encoder_output": encoder_output,
+        }
+
+    @classmethod
+    def from_pretrained(cls, path, device="cpu", return_model_args=False):
+        """Load a pretrained CTC encoder"""
+        with open(os.path.join(path, "config.json"), "r") as f:
+            model_args = json.load(f)
+
+        model = cls(**model_args).to(device)
+
+        map_location = device
+        state_dict = torch.load(
+            os.path.join(path, "model_best.pt"), map_location=map_location
+        )
+        model.load_state_dict(state_dict)
+
+        if return_model_args:
+            return model, model_args
+
+        return model
+
+    def save_pretrained(self, path):
+        """Save model config and weights"""
+        os.makedirs(path, exist_ok=True)
+
+        config = {
+            "vocab_size": self.vocab_size,
+            "d_model": self.d_model,
+            "num_mel_bins": self.num_mel_bins,
+            "num_encoder_layers": self.num_encoder_layers,
+            "max_source_positions": self.max_source_positions,
+        }
+
+        with open(os.path.join(path, "config.json"), "w") as f:
+            json.dump(config, f, indent=4)
+
+        torch.save(self.state_dict(), os.path.join(path, "model_best.pt"))

@@ -185,6 +185,12 @@ def get_duration(audio_fpath) -> float:
     return float(result.stdout.decode("utf-8"))
 
 def get_batch(train_iter, train_loader, accelerator, logger):
+    try:
+        batch_dict = next(train_iter)
+    except StopIteration:
+        train_iter = iter(train_loader)
+        batch_dict = next(train_iter)
+    return batch_dict
     while True:
         try:
             try:
