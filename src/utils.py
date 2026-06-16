@@ -11,14 +11,79 @@ from typing import Union
 import numpy as np
 import subprocess
 
+from lhotse import CutSet, load_manifest
 
 logger = logging.getLogger(__name__)
 
 
+
+def create_scheduler(opt, args):
+    if args.warmup:
+        if args.scheduler == 'cosine':
+            scheduler = torch.optim.lr_scheduler.LambdaLR(
+                opt,
+                lr_lambda=lambda step: (
+                    (step + 1) / args.warmup if step < args.warmup
+                    else 0.5 * (1.0 + torch.cos(torch.tensor((step - args.warmup) / max(args.steps - args.warmup, 1) * 3.141592653589793)).item())
+                )
+            )
+        else:  # linear
+            scheduler = torch.optim.lr_scheduler.LambdaLR(
+                opt,
+                lr_lambda=lambda step: (
+                    (step + 1) / args.warmup if step < args.warmup
+                    else max(0.0, 1.0 - (step - args.warmup) / max(args.steps - args.warmup, 1))
+                )
+            )
+
+    else:
+        scheduler = None
+
+    return scheduler
+
+
+class CommonVoiceASRDataset(torch.utils.data.Dataset):
+    def __init__(self, cutset: CutSet):
+        # .to_eager() ensures metadata is in RAM for fast random access
+        self.cuts = cutset.to_eager()
+        self.cut_ids = list(self.cuts.ids)
+
+    def __len__(self):
+        return len(self.cut_ids)
+
+    def __getitem__(self, idx):
+        # 1. Map the integer index to a Lhotse Cut ID
+        cut_id = self.cut_ids[idx]
+        cut = self.cuts[cut_id]
+
+        # load_audio() returns shape (channels, samples). We squeeze to 1D for mono.
+        model_input = cut.load_audio().squeeze(0)
+
+        # 3. Extract the transcription
+        # CommonVoice cuts generally have exactly one supervision object
+        text = cut.supervisions[0].text
+
+        return {
+            "audio": {"path": cut_id, "array": model_input, "sampling_rate": cut.sampling_rate},
+            "transcript": text
+        }
+
+def load_es_commonvoice(manifest_dir: str = '/mnt/scratch/tmp/isedlacek/data/common_voice_es'):
+    cutsets = {}
+    for split in ["train", "dev", "test"]:
+        cutsets[split] = CutSet.from_manifests(
+            recordings=load_manifest(os.path.join(manifest_dir, f"cv-es_recordings_{split}.jsonl.gz")),
+            supervisions=load_manifest(os.path.join(manifest_dir, f"cv-es_supervisions_{split}.jsonl.gz")),
+        ).resample(16000)
+
+    # return a dict of CommonVoiceASRDataset for each split
+    datasets = {split: CommonVoiceASRDataset(cutset) for split, cutset in cutsets.items()}
+    return datasets
+
 class TestSetWrapper(torch.utils.data.Dataset):
     def __init__(self, dataset) -> None:
         self.dataset = dataset
-    
+
     def __len__(self):
         return len(self.dataset)
 
@@ -166,7 +231,7 @@ def stacking_downsampler(embeds, factor=6):
         embeds.shape[1] // factor,
         embeds.shape[2] * factor
     )
-    
+
     return embeds
 
 def get_duration(audio_fpath) -> float:
@@ -185,6 +250,13 @@ def get_duration(audio_fpath) -> float:
     return float(result.stdout.decode("utf-8"))
 
 def get_batch(train_iter, train_loader, accelerator, logger):
+    try:
+        batch_dict = next(train_iter)
+    except StopIteration:
+        train_iter = iter(train_loader)
+        batch_dict = next(train_iter)
+    return batch_dict
+    """
     while True:
         try:
             try:
@@ -198,3 +270,4 @@ def get_batch(train_iter, train_loader, accelerator, logger):
             continue
         break
     return batch_dict
+    """

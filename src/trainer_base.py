@@ -41,7 +41,7 @@ def main(args):
         model, model_args = SpeechLLMBase.from_pretrained(
             args.from_pretrained,
             device=accelerator.device,
-            return_model_args=True,
+            return_model_args=True
         )
 
     else:

@@ -8,6 +8,7 @@ from torch.nn import CrossEntropyLoss
 from typing import Optional
 from transformers import AutoModelForCausalLM, WhisperForConditionalGeneration
 from transformers.modeling_outputs import BaseModelOutput
+from peft import get_peft_model, LoraConfig
 
 from connector import Connector, SinusoidalPositionalEmbedding
 
@@ -31,7 +32,7 @@ def shift_tokens_right(input_ids: torch.Tensor, pad_token_id: Optional[int], dec
 class SpeechLLMBase(nn.Module):
     def __init__(
         self,
-        speech_enc=None, 
+        speech_enc=None,
         speech_enc_id=None,
         llm_id=None,
         llm=None,
@@ -46,12 +47,24 @@ class SpeechLLMBase(nn.Module):
         assert llm is not None or llm_id is not None, "Either llm or llm_id must be provided"
         assert speech_enc is not None or speech_enc_id is not None, "Either speech_enc or speech_enc_id must be provided"
 
+        self.lora_r = lora_r
+        self.lora_a = lora_a if lora_a is not None else lora_r
+
         if llm is not None:
             self.llm = llm.cuda()
             self.llm_id = llm.config._name_or_path
         else:
             self.llm = AutoModelForCausalLM.from_pretrained(llm_id, torch_dtype=torch_dtype).cuda()
         self.freeze_llm()
+
+        if lora_r is not None:
+            lora_config = LoraConfig(
+                r=lora_r,
+                lora_alpha=self.lora_a,
+                target_modules='all-linear',
+                bias='none',
+            )
+            self.llm = get_peft_model(self.llm, lora_config)
 
         # TODO make general and allow for other encoders
         if 'whisper' in speech_enc_id:
@@ -69,7 +82,7 @@ class SpeechLLMBase(nn.Module):
             )
 
         self.connector = Connector(
-            self.speech_encoder.config.get('d_model'), # FIXME not general
+        self.speech_encoder.config.d_model, # FIXME not general
             self.llm.config.hidden_size,
             **connector_config,
             **kwargs,
@@ -102,23 +115,36 @@ class SpeechLLMBase(nn.Module):
 
     def freeze_llm(self):
         self.llm.requires_grad_(False)
-    
+
+    def add_lora_adapters(self, lora_r, lora_a=None):
+        """Wrap self.llm with LoRA adapters. Safe to call after from_pretrained."""
+        assert self.lora_r is None, "LoRA adapters are already attached"
+        self.lora_r = lora_r
+        self.lora_a = lora_a if lora_a is not None else lora_r
+        lora_config = LoraConfig(
+            r=self.lora_r,
+            lora_alpha=self.lora_a,
+            target_modules='all-linear',
+            bias='none',
+        )
+        self.llm = get_peft_model(self.llm, lora_config)
+
     def encoder_unfreeze_layers(self, n):
         self.freeze_encoder()
         for i in range(1, n + 1):
             self.speech_encoder.layers[-i].requires_grad_(True)
 
     def state_dict(self, **kwargs):
-        # FIXME -- adapt to the new scenario, think about how to store lora adapters
-        return {
-            "connector": self.connector.state_dict(**kwargs),
-        }
+        d = {"connector": self.connector.state_dict(**kwargs)}
+        if self.lora_r is not None:
+            d["lora"] = {k: v for k, v in self.llm.state_dict(**kwargs).items() if "lora_" in k}
+        return d
 
     def load_state_dict(self, state_dict, **kwargs):
-        #self.speech_encoder.load_state_dict(state_dict['speech_encoder'], **kwargs)
         self.connector.load_state_dict(state_dict['connector'], **kwargs)
-        #state_dict['out_proj.weight'] = self.out_proj.weight.data
-        #super(JointRetrieverQAModel, self).load_state_dict(state_dict, **kwargs)
+        if "lora" in state_dict:
+            # strict=False so non-lora weights in the LLM are not required
+            self.llm.load_state_dict(state_dict['lora'], strict=False)
 
     def encode_speech(self, speech_feats, attention_mask=None):
         # common for both branches
@@ -385,7 +411,7 @@ class FBankEncoder(nn.Module):
     ):
 
         super(FBankEncoder, self).__init__()
-        
+
         embed_dim = d_model
         self.config = {'d_model': embed_dim}
         self.num_mel_bins = num_mel_bins
@@ -410,4 +436,3 @@ class FBankEncoder(nn.Module):
         x = x.permute(0, 2, 1)
         x = self.embed_positions(x)
         return BaseModelOutput(x)
-

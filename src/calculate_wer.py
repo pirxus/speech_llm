@@ -6,12 +6,19 @@ import argparse
 parser = argparse.ArgumentParser()
 parser.add_argument("--input", type=str, required=True, nargs="+", help="List of prediction json files.")
 parser.add_argument("--includes", type=str, default="", help="Filter only experiments that include this string in the name.")
+parser.add_argument("--spanish", action="store_true", help="Use Spanish normalization rules.")
 
 args = parser.parse_args()
 
 normalizer = EnglishNormalizer()
 def normalize(text):
-    return normalizer(text).strip()
+    if args.spanish:
+        text = text.replace('<|im_end|>', '')
+        text = text.lower()
+        text = text.translate(str.maketrans('', '', '!"#$%&\'()*+,-./:;<=>?@[\\]^_`{|}~'))
+        return text.strip()
+    else:
+        return normalizer(text).strip()
 
 def pprint(string):
     print(json.dumps(string, indent=4))
@@ -41,7 +48,7 @@ for input_file in args.input:
         data = json.load(f)
 
     for split, split_data in data.items():
-        
+
         labels = [ normalize(item) for item in split_data['labels'] ]
         predictions = [ normalize(item) for item in split_data['predictions'] ]
 
